@@ -1,106 +1,154 @@
+#define LED_BUILTIN 2 // Default led
+#define DHTPIN 4 // DHT22 data pin
+#define DHTTYPE DHT22 // DHT22 sensor type
+
+#include <FS.h>
+#include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-#include <EEPROM.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+WiFiClient espClient;
 
-// Define the global variables to store the WiFi credentials and email
-String ssid;
-String password;
-String email;
+#include <Ticker.h>
+Ticker ticker;
 
-// Define the EEPROM addresses for storing the WiFi credentials and email
-int ssidAddress = 0;
-int passwordAddress = 32;
-int emailAddress = 64;
+DHT dht(DHTPIN, DHTTYPE);
+
+bool shouldSaveConfig = false;
+char mqtt_server[40] = "mqtt";
+char mqtt_port[6] = "1883";
+char mqtt_topic[40] = "sensors/esp-sensor";
+char poll_interval[6] = "5";
+char sensor_name[40] = "sensorA";
 
 void setup() {
-  // Start the serial communication
-  Serial.begin(9600);
-  
-  // Read the stored values from EEPROM
-  readCredentials();
-  
-  // If the WiFi credentials are not stored, start the access point
-  if (ssid == "" || password == "") {
-    startAccessPoint();
-  } else { // Otherwise, connect to the stored WiFi network
-    connectWiFi();
-  }
+	// Setup serial as 8E1 to communicate with sound meter
+	Serial.begin(9600);
+
+  dht.begin();
+
+	// set led pin as output and blink 0.5s interval until connected
+	pinMode(LED_BUILTIN, OUTPUT);
+	ticker.attach(0.5, led_tick);
+	
+	load_settings();
+	
+	// WiFiManager
+	// Local intialization. Once its business is done, there is no need to keep it around
+	WiFiManager wifiManager;
+	wifiManager.setAPCallback(configModeCallback);
+	wifiManager.setSaveConfigCallback(saveConfigCallback);
+	
+	// custom parameters
+	WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
+	wifiManager.addParameter(&custom_mqtt_server);
+	WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
+	wifiManager.addParameter(&custom_mqtt_port);
+	WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", mqtt_topic, 40);
+	wifiManager.addParameter(&custom_mqtt_topic);
+	WiFiManagerParameter custom_poll_interval("interval", "poll interval", poll_interval, 6);
+	wifiManager.addParameter(&custom_poll_interval);
+	WiFiManagerParameter custom_sensor_name("sensor name", "sensor name", sensor_name, 40);
+	wifiManager.addParameter(&custom_sensor_name);
+		
+	// try to connect or fallback to ESP+ChipID AP config mode.
+	if ( ! wifiManager.autoConnect()) {
+		// reset and try again, or maybe put it to deep sleep
+		ESP.reset();
+		delay(1000);
+	}
+	
+	// read paramters
+	strcpy(mqtt_server, custom_mqtt_server.getValue());
+	strcpy(mqtt_port, custom_mqtt_port.getValue());
+	strcpy(mqtt_topic, custom_mqtt_topic.getValue());
+	strcpy(poll_interval, custom_poll_interval.getValue());
+	strcpy(sensor_name, custom_sensor_name.getValue());
+	
+	// if we went through config, we should save our changes.
+	if (shouldSaveConfig) save_settings();
+	
+	// no more blinking
+	ticker.detach();
+	
 }
 
 void loop() {
-  // Your code for normal operation goes here
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.print(" *C | Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+  ESP.deepSleep(300000);
 }
 
-void startAccessPoint() {
-  // Create an instance of WiFiManager
-  WiFiManager wifiManager;
 
-  // Set the custom parameters to configure the access point
-  WiFiManagerParameter customSsid("ssid", "SSID", "", 32);
-  WiFiManagerParameter customPassword("password", "Password", "", 32);
-  WiFiManagerParameter customEmail("email", "Email", "", 64);
-  wifiManager.addParameter(&customSsid);
-  wifiManager.addParameter(&customPassword);
-  wifiManager.addParameter(&customEmail);
-
-  // Start the access point and the web server
-  wifiManager.autoConnect("ESP Access Point");
-
-  // Read the values from the custom parameters
-  ssid = customSsid.getValue();
-  password = customPassword.getValue();
-  email = customEmail.getValue();
-
-  // Save the values to the EEPROM
-  saveCredentials();
-
-  // Restart the ESP to connect to the configured WiFi network
-  ESP.reset();
+// WiFiManager requiring config save callback
+void saveConfigCallback () {
+	shouldSaveConfig = true;
 }
 
-void connectWiFi() {
-  // Connect to the stored WiFi network
-  WiFi.begin(ssid.c_str(), password.c_str());
-  
-  // Wait for the WiFi connection to be established
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
-
-  // Print the local IP address
-  Serial.print("Local IP address: ");
-  Serial.println(WiFi.localIP());
+// WiFiManager entering configuration mode callback
+void configModeCallback(WiFiManager *myWiFiManager) {
+	// entered config mode, make led toggle faster
+	ticker.attach(0.2, led_tick);
 }
 
-void saveCredentials() {
-  // Erase the EEPROM contents
-  for (int i = 0; i < 512; i++) {
-    EEPROM.write(i, 0);
-  }
+// Saves custom parameters to /config.json on SPIFFS
+void save_settings() {
+	DynamicJsonBuffer jsonBuffer;
+	JsonObject& json = jsonBuffer.createObject();
+	json["mqtt_server"] = mqtt_server;
+	json["mqtt_port"] = mqtt_port;
+	json["mqtt_topic"] = mqtt_topic;
+	json["poll_interval"] = poll_interval;
+	json["sensor_name"] = sensor_name;
 
-  // Write the WiFi credentials and email to the EEPROM
-  for (int i = 0; i < ssid.length(); i++) {
-    EEPROM.write(ssidAddress + i, ssid[i]);
-  }
-  for (int i = 0; i < password.length(); i++) {
-    EEPROM.write(passwordAddress + i, password[i]);
-  }
-  for (int i = 0; i < email.length(); i++) {
-    EEPROM.write(emailAddress + i, email[i]);
-  }
-
-  // Commit the changes to the EEPROM
-  EEPROM.commit();
+	File configFile = SPIFFS.open("/config.json", "w");
+	json.printTo(configFile);
+	configFile.close();
 }
 
-void readCredentials() {
-  // Read the WiFi credentials and email from the EEPROM
-  for (int i = 0; i < 32; i++) {
-    ssid += char(EEPROM.read(ssidAddress + i));
-    password += char(EEPROM.read(passwordAddress + i));
+// Loads custom parameters from /config.json on SPIFFS
+void load_settings() {
+	if (SPIFFS.begin() && SPIFFS.exists("/config.json")) {
+		File configFile = SPIFFS.open("/config.json", "r");
+		
+		if (configFile) {
+			size_t size = configFile.size();
+			// Allocate a buffer to store contents of the file.
+			std::unique_ptr<char[]> buf(new char[size]);
+
+			configFile.readBytes(buf.get(), size);
+			DynamicJsonBuffer jsonBuffer;
+			JsonObject& json = jsonBuffer.parseObject(buf.get());
+			
+			if (json.success()) {
+				strcpy(mqtt_server, json["mqtt_server"]);
+				strcpy(mqtt_port, json["mqtt_port"]);
+				strcpy(mqtt_topic, json["mqtt_topic"]);
+				strcpy(poll_interval, json["poll_interval"]);
+				strcpy(sensor_name, json["sensor_name"]);
+			}
+		}
+	}
+}
+
+// Remove the file
+void erase_settings() {
+  if (SPIFFS.begin() && SPIFFS.exists("/config.json")) {
+    SPIFFS.remove("/config.json");
   }
-  for (int i = 0; i < 64; i++) {
-    email += char(EEPROM.read(emailAddress + i));
-  }
+}
+
+// Called by ticker for LED toggle
+void led_tick() {
+	// toggle LEF state
+	int state = digitalRead(LED_BUILTIN);
+	digitalWrite(LED_BUILTIN, !state);
 }
