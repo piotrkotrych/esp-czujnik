@@ -10,6 +10,9 @@
 #include <WiFiManager.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <stdlib.h>
+#include <WiFiClientSecure.h>
+#include <ESP8266HTTPClient.h>
 WiFiClient espClient;
 
 #include <Ticker.h>
@@ -18,15 +21,23 @@ Ticker ticker;
 DHT dht(DHTPIN, DHTTYPE);
 
 bool shouldSaveConfig = false;
-char mqtt_server[40] = "mqtt";
-char mqtt_port[6] = "1883";
-char mqtt_topic[40] = "sensors/esp-sensor";
-char poll_interval[6] = "5";
-char sensor_name[40] = "sensorA";
+
+//client setup for backend server
+char postUrl[100] = "so718.sohost.pl";
+char email[40] = "test@test.pl";
+char name[40] = "test";
+char lokacja[40] = "lokacja";
+char dsTime[2] = "1";
+
+//reset button pin D1
+const int BUTTON_PIN = 5;
 
 void setup() {
 	// Setup serial as 8E1 to communicate with sound meter
 	Serial.begin(9600);
+
+	// reset button pin mode 10k ohm pullup
+	pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   dht.begin();
 
@@ -35,48 +46,61 @@ void setup() {
 	ticker.attach(0.5, led_tick);
 	
 	load_settings();
+
+	//get chipid as string id
+	String id = String(ESP.getChipId());
 	
 	// WiFiManager
 	// Local intialization. Once its business is done, there is no need to keep it around
 	WiFiManager wifiManager;
+  String apName = "Temp Sensor " + id;
 	wifiManager.setAPCallback(configModeCallback);
 	wifiManager.setSaveConfigCallback(saveConfigCallback);
-	
-	// custom parameters
-	WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
-	wifiManager.addParameter(&custom_mqtt_server);
-	WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
-	wifiManager.addParameter(&custom_mqtt_port);
-	WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", mqtt_topic, 40);
-	wifiManager.addParameter(&custom_mqtt_topic);
-	WiFiManagerParameter custom_poll_interval("interval", "poll interval", poll_interval, 6);
-	wifiManager.addParameter(&custom_poll_interval);
-	WiFiManagerParameter custom_sensor_name("sensor name", "sensor name", sensor_name, 40);
-	wifiManager.addParameter(&custom_sensor_name);
+
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    Serial.println("Button pressed during restart. Erasing settings...");
+    erase_settings();
+    wifiManager.resetSettings();
+    ESP.restart();
+  } else {
+    
+
+		// custom parameters
+		WiFiManagerParameter custom_name("name", "Sensor name", name, 40, " required");
+		wifiManager.addParameter(&custom_name);
+		WiFiManagerParameter custom_email("email", "User email", email, 40, " required");
+		wifiManager.addParameter(&custom_email);
+		WiFiManagerParameter custom_location("lokacja", "Sensor location", lokacja, 40, " required");
+		wifiManager.addParameter(&custom_location);
+		WiFiManagerParameter custom_dsTime("dsTime", "Deep sleep time", dsTime, 2, " required maxlength=2");
+		wifiManager.addParameter(&custom_dsTime);
+		WiFiManagerParameter custom_postUrl("postUrl", "Server adress", postUrl, 100, " required disabled");
+		wifiManager.addParameter(&custom_postUrl);
 		
-	// try to connect or fallback to ESP+ChipID AP config mode.
-	if ( ! wifiManager.autoConnect()) {
-		// reset and try again, or maybe put it to deep sleep
-		ESP.reset();
-		delay(1000);
+			
+		// try to connect or fallback to ESP+ChipID AP config mode.
+		if ( ! wifiManager.autoConnect(apName.c_str())) {
+			// reset and try again, or maybe put it to deep sleep
+			ESP.deepSleep(10000000);
+		}
+		
+		// read paramters
+		strcpy(name, custom_name.getValue());
+		strcpy(email, custom_email.getValue());
+		strcpy(lokacja, custom_location.getValue());
+		strcpy(dsTime, custom_dsTime.getValue());
+		strcpy(postUrl, custom_postUrl.getValue());
+		
+		// if we went through config, we should save our changes.
+		if (shouldSaveConfig) save_settings();
+		
+		// no more blinking
+		ticker.detach();
 	}
-	
-	// read paramters
-	strcpy(mqtt_server, custom_mqtt_server.getValue());
-	strcpy(mqtt_port, custom_mqtt_port.getValue());
-	strcpy(mqtt_topic, custom_mqtt_topic.getValue());
-	strcpy(poll_interval, custom_poll_interval.getValue());
-	strcpy(sensor_name, custom_sensor_name.getValue());
-	
-	// if we went through config, we should save our changes.
-	if (shouldSaveConfig) save_settings();
-	
-	// no more blinking
-	ticker.detach();
-	
 }
 
 void loop() {
+	String id = String(ESP.getChipId());
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
   Serial.print("Temperature: ");
@@ -84,7 +108,42 @@ void loop() {
   Serial.print(" *C | Humidity: ");
   Serial.print(humidity);
   Serial.println(" %");
-  ESP.deepSleep(300000);
+
+	if (isnan(temperature) || isnan(humidity)) {
+		Serial.println("Failed to read from DHT sensor!");
+		ticker.attach(0.2, led_tick);
+		delay(2000);
+		ticker.detach();
+		ESP.deepSleep(10000000);
+	}else{
+		// Create a JSON object
+		StaticJsonBuffer<200> jsonBuffer;
+		JsonObject& root = jsonBuffer.createObject();
+
+		// Add the variables to the JSON object
+		root["chipid"] = id;
+		root["email"] = email;
+		root["name"] = name;
+		root["lokacja"] = lokacja;
+		root["temperature"] = temperature;
+		root["humidity"] = humidity;
+
+		// Serialize the JSON object to a string
+		String jsonString;
+		root.printTo(jsonString);
+
+		// Send the POST request
+		if(sendPostRequest("https://www.so718.sohost.pl/sensor/api.php", jsonString.c_str()) == 200){
+      Serial.println("ok");
+    }else{
+      Serial.println("not ok");
+    }
+	}
+
+	int num = atoi(dsTime);
+
+  // ESP.deepSleep(60000000 * num);
+  ESP.deepSleep(10000000);
 }
 
 
@@ -103,11 +162,11 @@ void configModeCallback(WiFiManager *myWiFiManager) {
 void save_settings() {
 	DynamicJsonBuffer jsonBuffer;
 	JsonObject& json = jsonBuffer.createObject();
-	json["mqtt_server"] = mqtt_server;
-	json["mqtt_port"] = mqtt_port;
-	json["mqtt_topic"] = mqtt_topic;
-	json["poll_interval"] = poll_interval;
-	json["sensor_name"] = sensor_name;
+	json["postUrl"] = postUrl;
+	json["email"] = email;
+	json["name"] = name;
+	json["lokacja"] = lokacja;
+	json["dsTime"] = dsTime;
 
 	File configFile = SPIFFS.open("/config.json", "w");
 	json.printTo(configFile);
@@ -129,11 +188,13 @@ void load_settings() {
 			JsonObject& json = jsonBuffer.parseObject(buf.get());
 			
 			if (json.success()) {
-				strcpy(mqtt_server, json["mqtt_server"]);
-				strcpy(mqtt_port, json["mqtt_port"]);
-				strcpy(mqtt_topic, json["mqtt_topic"]);
-				strcpy(poll_interval, json["poll_interval"]);
-				strcpy(sensor_name, json["sensor_name"]);
+				strcpy(postUrl, json["postUrl"]);
+				strcpy(email, json["email"]);
+				strcpy(name, json["name"]);
+				strcpy(lokacja, json["lokacja"]);
+				strcpy(dsTime, json["dsTime"]);
+			} else {
+				Serial.println("failed to load config.json");
 			}
 		}
 	}
@@ -151,4 +212,21 @@ void led_tick() {
 	// toggle LEF state
 	int state = digitalRead(LED_BUILTIN);
 	digitalWrite(LED_BUILTIN, !state);
+}
+
+// Function to send the POST request
+int sendPostRequest(const char* url, const char* payload) {
+  WiFiClientSecure client;
+
+  client.setInsecure();
+
+  HTTPClient http;
+
+  http.begin(client, url);
+
+  http.addHeader("Content-Type", "application/json");
+  int httpResponseCode = http.POST(payload);
+
+  return httpResponseCode;
+
 }
