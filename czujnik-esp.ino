@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <WiFiClientSecure.h>
 #include <ESP8266HTTPClient.h>
-
 #include <Ticker.h>
 Ticker ticker;
 
@@ -22,7 +21,7 @@ DHT dht(DHTPIN, DHTTYPE);
 bool shouldSaveConfig = false;
 
 //client setup for backend server
-char postUrl[100] = "so718.sohost.pl";
+char postUrl[100] = "https://www.so718.sohost.pl/sensor/api.php";
 char email[40] = "test@test.pl";
 char name[40] = "test";
 char lokacja[40] = "lokacja";
@@ -134,7 +133,7 @@ void loop() {
 		root.printTo(jsonString);
 
 		// Send the POST request
-		if(sendPostRequest("https://www.so718.sohost.pl/sensor/api.php", jsonString.c_str()) == 200){
+		if(sendPostRequest(postUrl, jsonString.c_str()) == 200){
       Serial.println("ok");
     }else{
       Serial.println("not ok");
@@ -144,7 +143,7 @@ void loop() {
 	int num = atoi(dsTime);
 
   // ESP.deepSleep(60000000 * num);
-  ESP.deepSleep(10000000);
+  ESP.deepSleep(60000000 * num);
 }
 
 
