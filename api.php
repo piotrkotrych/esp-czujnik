@@ -22,6 +22,12 @@ if ($conn->connect_error) {
 //get post data and decode json to php array
 $data = json_decode(file_get_contents('php://input'), true);
 
+//check if data exists
+if (!isset($data["chipid"]) || !isset($data["email"]) || !isset($data["name"]) || !isset($data["lokacja"]) || !isset($data["temperature"]) || !isset($data["humidity"])) {
+  echo http_response_code(400);
+  die();
+}
+
 //get data from array
 $chipid = $data["chipid"];
 $email = $data["email"];
@@ -37,6 +43,7 @@ if ($conn->query($sql) === TRUE) {
   echo http_response_code(200);
 } else {
   echo http_response_code(400);
+  die();
 }
 
 $conn->close();

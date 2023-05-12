@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <WiFiClientSecure.h>
 #include <ESP8266HTTPClient.h>
-WiFiClient espClient;
 
 #include <Ticker.h>
 Ticker ticker;
@@ -77,6 +76,8 @@ void setup() {
 		WiFiManagerParameter custom_postUrl("postUrl", "Server adress", postUrl, 100, " required disabled");
 		wifiManager.addParameter(&custom_postUrl);
 		
+    wifiManager.setConnectTimeout(20);
+		wifiManager.setTimeout(20); // 20 seconds
 			
 		// try to connect or fallback to ESP+ChipID AP config mode.
 		if ( ! wifiManager.autoConnect(apName.c_str())) {
