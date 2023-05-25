@@ -16,6 +16,7 @@ $conn = new mysqli($servername, $username, $password, $dbname);
 
 // Check connection
 if ($conn->connect_error) {
+  echo http_response_code(400);
   die("Connection failed: " . $conn->connect_error);
 }
 

@@ -30,7 +30,15 @@ char dsTime[2] = "1";
 //reset button pin D1
 const int BUTTON_PIN = 5;
 
+//battery percentage setup
+const float batteryPercent = 0.0;
+const float batteryVoltage = 0.0;
+const float batteryVoltageMin = 2.8;
+const float batteryVoltageMax = 4.2;
+const int batteryPin = A0;
+
 void setup() {
+  WiFi.mode(WIFI_STA);
 	// Setup serial as 8E1 to communicate with sound meter
 	Serial.begin(9600);
 
@@ -72,16 +80,18 @@ void setup() {
 		wifiManager.addParameter(&custom_location);
 		WiFiManagerParameter custom_dsTime("dsTime", "Deep sleep time", dsTime, 2, " required maxlength=2");
 		wifiManager.addParameter(&custom_dsTime);
-		WiFiManagerParameter custom_postUrl("postUrl", "Server adress", postUrl, 100, " required disabled");
+		WiFiManagerParameter custom_postUrl("postUrl", "Server adress", postUrl, 100, " required");
 		wifiManager.addParameter(&custom_postUrl);
 		
     wifiManager.setConnectTimeout(20);
-		wifiManager.setTimeout(20); // 20 seconds
+    wifiManager.setTimeout(180);
 			
 		// try to connect or fallback to ESP+ChipID AP config mode.
 		if ( ! wifiManager.autoConnect(apName.c_str())) {
 			// reset and try again, or maybe put it to deep sleep
-			ESP.deepSleep(10000000);
+      Serial.println("Failed to connect or hit timeout");
+      delay(1000);
+			ESP.deepSleep(60000000);
 		}
 		
 		// read paramters
@@ -103,11 +113,15 @@ void loop() {
 	String id = String(ESP.getChipId());
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
+  // float temperature = 20;
+  // float humidity = 40;
   Serial.print("Temperature: ");
   Serial.print(temperature);
   Serial.print(" *C | Humidity: ");
   Serial.print(humidity);
   Serial.println(" %");
+
+  if(postUrl)
 
 	if (isnan(temperature) || isnan(humidity)) {
 		Serial.println("Failed to read from DHT sensor!");
@@ -131,6 +145,9 @@ void loop() {
 		// Serialize the JSON object to a string
 		String jsonString;
 		root.printTo(jsonString);
+
+    Serial.println(jsonString);
+    Serial.println(postUrl);
 
 		// Send the POST request
 		if(sendPostRequest(postUrl, jsonString.c_str()) == 200){
@@ -175,9 +192,10 @@ void save_settings() {
 
 // Loads custom parameters from /config.json on SPIFFS
 void load_settings() {
+  Serial.println("laduje konfiguracje");
 	if (SPIFFS.begin() && SPIFFS.exists("/config.json")) {
 		File configFile = SPIFFS.open("/config.json", "r");
-		
+		Serial.println("laduje konfiguracje, plik znaleziony");
 		if (configFile) {
 			size_t size = configFile.size();
 			// Allocate a buffer to store contents of the file.
@@ -189,15 +207,23 @@ void load_settings() {
 			
 			if (json.success()) {
 				strcpy(postUrl, json["postUrl"]);
+        Serial.print("Zaladowany ");
+        Serial.println(postUrl);
 				strcpy(email, json["email"]);
+        Serial.print("Zaladowany ");
+        Serial.println(email);
 				strcpy(name, json["name"]);
 				strcpy(lokacja, json["lokacja"]);
 				strcpy(dsTime, json["dsTime"]);
 			} else {
 				Serial.println("failed to load config.json");
 			}
+		}else{
+			Serial.println("failed to load config.json");
 		}
-	}
+	}else{
+		Serial.println("file config.json does not exist");
+  }
 }
 
 // Remove the file
@@ -221,11 +247,11 @@ int sendPostRequest(const char* url, const char* payload) {
   client.setInsecure();
 
   HTTPClient http;
-
   http.begin(client, url);
 
   http.addHeader("Content-Type", "application/json");
   int httpResponseCode = http.POST(payload);
+  Serial.println(httpResponseCode);
 
   return httpResponseCode;
 
