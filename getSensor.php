@@ -8,7 +8,7 @@ header("Access-Control-Allow-Methods: *");
 //database connection
 $servername = "localhost";
 $username = "so718_sensor";
-$password = "eltwin123";
+$password = "";
 $dbname = "so718_sensor";
 
 // Create connection
