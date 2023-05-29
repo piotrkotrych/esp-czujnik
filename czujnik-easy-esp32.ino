@@ -5,7 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
-#define DHTPIN 4 // DHT22 data pin
+#define DHTPIN 10 // DHT22 data pin
 #define DHTTYPE DHT22 // DHT22 sensor type
 
 DHT dht(DHTPIN, DHTTYPE);
@@ -17,7 +17,7 @@ const char* postUrl = "https://www.so718.sohost.pl/sensor/api.php";
 const char* email = "test@test.pl";
 const char* name = "test";
 const char* lokacja = "lokacja";
-const int dsTime = 5;
+const int dsTime = 1;
 float temperature = 0;
 float humidity = 0;
 
@@ -30,9 +30,14 @@ const float batteryVoltageCalibrationOffset = 0.0;
 const float batteryVoltageCalibrationFactor = 1.0;
 
 void setup() {
-  Serial.begin(9600);
+
+  WiFi.mode(WIFI_STA);
+
+  Serial.begin(115200);
 
   dht.begin();
+
+  pinMode(batteryPin, INPUT);
   
   // Connect to Wi-Fi
   WiFi.begin(ssid, password);
@@ -58,8 +63,14 @@ void setup() {
     float batteryPercentage = calculateBatteryPercentage(batteryVoltage);
 
     // Apply calibration values
-    batteryVoltage += batteryVoltageCalibrationOffset;
-    batteryVoltage *= batteryVoltageCalibrationFactor;
+    // batteryVoltage += batteryVoltageCalibrationOffset;
+    // batteryVoltage *= batteryVoltageCalibrationFactor;
+
+    //print values
+    Serial.print("Battery voltage: ");
+    Serial.println(batteryVoltage);
+    Serial.print("Battery percentage: ");
+    Serial.println(batteryPercentage);
 
     //send data to server using sendPostRequest and createJsonString functions
     String jsonString = createJsonString(batteryVoltage, batteryPercentage);
@@ -108,14 +119,13 @@ int sendPostRequest(const char* url, const char* payload) {
 
   http.addHeader("Content-Type", "application/json");
   int httpResponseCode = http.POST(payload);
-  Serial.println(httpResponseCode);
 
   return httpResponseCode;
 }
 
 // Function to read battery voltage
 float readBatteryVoltage() {
-  int rawValue = analogRead(batteryPin);
+  int rawValue = analogReadMilliVolts(batteryPin);
   float voltage = (rawValue / 4095.0) * 3.3; // Assuming ESP32 operates at 3.3V and using the full range of ADC
 
   return voltage;

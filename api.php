@@ -8,7 +8,7 @@ header("Access-Control-Allow-Methods: *");
 //database connection
 $servername = "localhost";
 $username = "so718_sensor";
-$password = "xxxxx";
+$password = "eltwin123";
 $dbname = "so718_sensor";
 
 // Create connection
@@ -36,9 +36,11 @@ $name = $data["name"];
 $location = $data["lokacja"];
 $temperature = $data["temperature"];
 $humidity = $data["humidity"];
+$battery_voltage = $data["batteryVoltage"];
+$battery_level = $data["batteryPercentage"];
 
 //insert data to database
-$sql = "INSERT INTO `sensor` (`id`, `chipid`, `email`, `name`, `location`, `temperature`, `humidity`, `measure_time`) VALUES (NULL, '$chipid', '$email', '$name', '$location', '$temperature', '$humidity', CURRENT_TIMESTAMP);";
+$sql = "INSERT INTO `sensor` (`id`, `chipid`, `email`, `name`, `location`, `temperature`, `humidity`, `measure_time`, `battery_voltage`, `battery_level`) VALUES (NULL, '$chipid', '$email', '$name', '$location', '$temperature', '$humidity', CURRENT_TIMESTAMP, '$battery_voltage', '$battery_level');";
 
 if ($conn->query($sql) === TRUE) {
   echo http_response_code(200);
